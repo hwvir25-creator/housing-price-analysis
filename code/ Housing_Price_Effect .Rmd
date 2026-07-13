@@ -1,0 +1,1462 @@
+---
+title: "Housing Price Analysis Using Multiple Linear Regression"
+author: "Minqin Wu"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: flatly
+---
+
+# Project Overview
+
+This project investigates the relationship between housing characteristics and residential sale prices using the Ames Housing dataset. The objective is to understand how structural and neighborhood characteristics are associated with housing prices by applying multiple linear regression. The analysis includes data cleaning, exploratory data analysis, model building, model diagnostics, response transformation, model selection, and interpretation of the final model.
+
+# Data Source
+
+The dataset used in this project comes from the **AmesHousing** package in R. The package provides a cleaned version of the Ames Housing dataset originally described by De Cock (2011). The dataset contains information on **2,930 residential properties** located in Ames, Iowa, with **82 variables** describing housing characteristics and sale prices. In this project, the dataset is loaded using the `make_ames()` function and then further processed for regression analysis.
+
+Reference:
+
+De Cock, D. (2011). *Ames, Iowa: Alternative to the Boston Housing Data as an End of Semester Regression Project.* Journal of Statistics Education, 19(3).
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center",
+  fig.width = 8,
+  fig.height = 5
+)
+
+library(AmesHousing)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(knitr)
+library(gridExtra)
+library(MASS)
+library(car)
+library(broom)
+
+```
+
+# 1. Import Dataset
+
+```{r load-data}
+
+# Load the original Ames Housing dataset
+housing_raw <- make_ames()
+
+# Select variables used in this analysis
+housing_data <- housing_raw %>%
+  transmute(
+    sale_price      = Sale_Price,
+    living_area     = Gr_Liv_Area,
+    basement_area   = Total_Bsmt_SF,
+    overall_quality = Overall_Qual,
+    year_built      = Year_Built,
+    neighborhood    = Neighborhood,
+    garage_capacity = Garage_Cars
+  )
+
+# Display the first six observations
+head(housing_data)
+
+# Display the dimensions of the dataset
+dim(housing_data)
+
+# Check the structure of the dataset
+str(housing_data)
+
+```
+
+
+# 2. Data Cleaning
+
+```{r data-cleaning}
+
+# Check the dimensions of the dataset
+dim(housing_data)
+
+# Check missing values
+missing_summary <- housing_data %>%
+  summarise(across(everything(), ~ sum(is.na(.))))
+
+kable(
+  missing_summary,
+  caption = "Number of Missing Values in Each Variable"
+)
+
+# Remove observations with missing values
+housing_clean <- housing_data %>%
+  drop_na()
+
+# Compare sample size before and after cleaning
+data.frame(
+  Dataset = c("Original", "Cleaned"),
+  Observations = c(nrow(housing_data), nrow(housing_clean))
+) %>%
+  kable(
+    caption = "Sample Size Before and After Data Cleaning"
+  )
+
+```
+
+# 3. Exploratory Data Analysis
+
+## 3.1 Response Variable
+
+### Summary Statistics
+
+```{r response-summary}
+
+sum_price <- summary(housing_clean$sale_price)
+
+tbl_price <- data.frame(
+  Statistic = c(
+    "Minimum",
+    "First Quartile",
+    "Median",
+    "Mean",
+    "Third Quartile",
+    "Maximum",
+    "Standard Deviation",
+    "Interquartile Range"
+  ),
+  Value = c(
+    sum_price["Min."],
+    sum_price["1st Qu."],
+    sum_price["Median"],
+    sum_price["Mean"],
+    sum_price["3rd Qu."],
+    sum_price["Max."],
+    sd(housing_clean$sale_price),
+    IQR(housing_clean$sale_price)
+  )
+)
+
+kable(
+  tbl_price,
+  digits = 2,
+  caption = "Summary Statistics for Housing Sale Price"
+)
+
+```
+
+### Distribution of Housing Sale Price
+
+```{r response-hist}
+
+ggplot(housing_clean, aes(x = sale_price)) +
+  geom_histogram(
+    bins = 50,
+    fill = "blue",
+    color = "white"
+  ) +
+  labs(
+    title = "Distribution of Housing Sale Prices",
+    x = "Sale Price (USD)",
+    y = "Frequency"
+  ) +
+  theme_minimal()
+
+```
+
+
+### Boxplot of Housing Sale Price
+
+```{r response-box}
+
+ggplot(housing_clean, aes(y = sale_price)) +
+  geom_boxplot(
+    fill = "blue"
+  ) +
+  labs(
+    title = "Boxplot of Housing Sale Prices",
+    y = "Sale Price (USD)"
+  ) +
+  theme_minimal()
+
+```
+
+## 3.2 Numerical Predictors
+
+### Summary Statistics
+
+```{r numerical-summary}
+
+num_summary <- data.frame(
+  Variable = c(
+    "Living Area",
+    "Basement Area",
+    "Year Built",
+    "Garage Capacity"
+  ),
+  Mean = c(
+    mean(housing_clean$living_area),
+    mean(housing_clean$basement_area),
+    mean(housing_clean$year_built),
+    mean(housing_clean$garage_capacity)
+  ),
+  SD = c(
+    sd(housing_clean$living_area),
+    sd(housing_clean$basement_area),
+    sd(housing_clean$year_built),
+    sd(housing_clean$garage_capacity)
+  ),
+  Min = c(
+    min(housing_clean$living_area),
+    min(housing_clean$basement_area),
+    min(housing_clean$year_built),
+    min(housing_clean$garage_capacity)
+  ),
+  Max = c(
+    max(housing_clean$living_area),
+    max(housing_clean$basement_area),
+    max(housing_clean$year_built),
+    max(housing_clean$garage_capacity)
+  )
+)
+
+kable(
+  num_summary,
+  digits = 2,
+  caption = "Summary Statistics for Numerical Predictors"
+)
+
+```
+
+### Scatterplot Matrix
+
+```{r scatter-matrix}
+
+pairs(
+  housing_clean[, c(
+    "sale_price",
+    "living_area",
+    "basement_area",
+    "year_built",
+    "garage_capacity"
+  )],
+  pch = 16,
+  col = "blue",
+  main = "Scatterplot Matrix for Sale Price and Numerical Predictors"
+)
+
+```
+
+
+### Relationships Between Sale Price and Numerical Predictors
+
+```{r numerical-scatter, fig.width=10, fig.height=8}
+
+par(mfrow = c(2,2))
+
+plot(
+  housing_clean$living_area,
+  housing_clean$sale_price,
+  main = "Sale Price vs Living Area",
+  xlab = "Living Area",
+  ylab = "Sale Price",
+  pch = 16,
+  col = "black"
+)
+abline(
+  lm(sale_price ~ living_area, data = housing_clean),
+  col = "red",
+  lwd = 2
+)
+
+plot(
+  housing_clean$basement_area,
+  housing_clean$sale_price,
+  main = "Sale Price vs Basement Area",
+  xlab = "Basement Area",
+  ylab = "Sale Price",
+  pch = 16,
+  col = "black"
+)
+abline(
+  lm(sale_price ~ basement_area, data = housing_clean),
+  col = "red",
+  lwd = 2
+)
+
+plot(
+  housing_clean$year_built,
+  housing_clean$sale_price,
+  main = "Sale Price vs Year Built",
+  xlab = "Year Built",
+  ylab = "Sale Price",
+  pch = 16,
+  col = "black"
+)
+abline(
+  lm(sale_price ~ year_built, data = housing_clean),
+  col = "red",
+  lwd = 2
+)
+
+plot(
+  housing_clean$garage_capacity,
+  housing_clean$sale_price,
+  main = "Sale Price vs Garage Capacity",
+  xlab = "Garage Capacity",
+  ylab = "Sale Price",
+  pch = 16,
+  col = "black"
+)
+abline(
+  lm(sale_price ~ garage_capacity, data = housing_clean),
+  col = "red",
+  lwd = 2
+)
+
+par(mfrow = c(1,1))
+
+```
+## 3.3 Categorical Predictors
+
+### Distribution of Overall Quality
+
+```{r quality-barplot}
+
+barplot(
+  table(housing_clean$overall_quality),
+  main = "Distribution of Overall Quality",
+  xlab = "Overall Quality",
+  ylab = "Number of Houses",
+  col = "blue",
+  las = 2,
+  cex.names = 0.8
+)
+
+```
+
+### Distribution of Neighborhoods
+
+```{r neighborhood-barplot, fig.width=10, fig.height=6}
+
+barplot(
+  table(housing_clean$neighborhood),
+  main = "Distribution of Neighborhoods",
+  xlab = "Neighborhood",
+  ylab = "Number of Houses",
+  col = "blue",
+  las = 2,
+  cex.names = 0.7
+)
+
+```
+
+### Sale Price by Overall Quality
+
+```{r quality-boxplot, fig.width=8, fig.height=6}
+
+boxplot(
+  sale_price ~ overall_quality,
+  data = housing_clean,
+  main = "Sale Price by Overall Quality",
+  xlab = "Overall Quality",
+  ylab = "Sale Price",
+  col = "white",
+  las = 2,
+  cex.axis = 0.8
+)
+
+```
+
+### Sale Price by Neighborhood
+
+```{r neighborhood-boxplot, fig.width=12, fig.height=6}
+
+boxplot(
+  sale_price ~ neighborhood,
+  data = housing_clean,
+  main = "Sale Price by Neighborhood",
+  xlab = "Neighborhood",
+  ylab = "Sale Price",
+  col = "white",
+  las = 2,
+  cex.axis = 0.55
+)
+
+```
+
+# 4. Initial Regression Model
+
+## 4.1 Multiple Linear Regression Model
+
+```{r initial-model}
+
+initial_model <- lm(
+  sale_price ~
+    living_area +
+    basement_area +
+    overall_quality +
+    year_built +
+    neighborhood +
+    garage_capacity,
+  data = housing_clean
+)
+
+summary(initial_model)
+
+```
+
+## 4.2 Initial Model Coefficients
+
+```{r initial-coefficient-table}
+
+initial_coefficient_table <- broom::tidy(
+  initial_model,
+  conf.int = TRUE,
+  conf.level = 0.95
+)
+
+initial_coefficient_table <- initial_coefficient_table[, c(
+  "term",
+  "estimate",
+  "std.error",
+  "statistic",
+  "p.value",
+  "conf.low",
+  "conf.high"
+)]
+
+colnames(initial_coefficient_table) <- c(
+  "Variable",
+  "Estimate",
+  "Standard Error",
+  "t Statistic",
+  "p-value",
+  "95% CI Lower",
+  "95% CI Upper"
+)
+
+kable(
+  initial_coefficient_table,
+  digits = 4,
+  caption = "Coefficient Estimates for the Initial Regression Model"
+)
+
+```
+
+## 4.3 Initial Model Fit
+
+```{r initial-model-fit}
+
+initial_model_fit <- broom::glance(initial_model)
+
+model_fit_table <- data.frame(
+  Measure = c(
+    "R-squared",
+    "Adjusted R-squared",
+    "Residual Standard Error",
+    "F Statistic",
+    "Model p-value",
+    "AIC",
+    "BIC"
+  ),
+  Value = c(
+    initial_model_fit$r.squared,
+    initial_model_fit$adj.r.squared,
+    initial_model_fit$sigma,
+    initial_model_fit$statistic,
+    initial_model_fit$p.value,
+    AIC(initial_model),
+    BIC(initial_model)
+  )
+)
+
+kable(
+  model_fit_table,
+  digits = 4,
+  caption = "Model Fit Measures for the Initial Regression Model"
+)
+
+```
+
+# 5. Initial Model Diagnostics
+
+## 5.1 Standard Regression Diagnostic Plots
+
+```{r initial-diagnostic-plots, fig.width=10, fig.height=8}
+
+par(mfrow = c(2, 2))
+
+plot(initial_model)
+
+par(mfrow = c(1, 1))
+
+```
+
+## 5.2 Residual Plots for Numerical Predictors
+
+```{r initial-numerical-residuals, fig.width=10, fig.height=8}
+
+initial_fitted_values <- fitted(initial_model)
+initial_standardized_residuals <- rstandard(initial_model)
+
+par(mfrow = c(2, 2))
+
+plot(
+  housing_clean$living_area,
+  initial_standardized_residuals,
+  main = "Residuals vs Living Area",
+  xlab = "Living Area",
+  ylab = "Standardized Residuals",
+  pch = 16,
+  col = "black"
+)
+abline(h = 0, col = "red", lty = 2, lwd = 2)
+
+plot(
+  housing_clean$basement_area,
+  initial_standardized_residuals,
+  main = "Residuals vs Basement Area",
+  xlab = "Basement Area",
+  ylab = "Standardized Residuals",
+  pch = 16,
+  col = "black"
+)
+abline(h = 0, col = "red", lty = 2, lwd = 2)
+
+plot(
+  housing_clean$year_built,
+  initial_standardized_residuals,
+  main = "Residuals vs Year Built",
+  xlab = "Year Built",
+  ylab = "Standardized Residuals",
+  pch = 16,
+  col = "black"
+)
+abline(h = 0, col = "red", lty = 2, lwd = 2)
+
+plot(
+  housing_clean$garage_capacity,
+  initial_standardized_residuals,
+  main = "Residuals vs Garage Capacity",
+  xlab = "Garage Capacity",
+  ylab = "Standardized Residuals",
+  pch = 16,
+  col = "black"
+)
+abline(h = 0, col = "red", lty = 2, lwd = 2)
+
+par(mfrow = c(1, 1))
+
+```
+
+## 5.3 Residual Plots for Categorical Predictors
+
+```{r initial-categorical-residuals, fig.width=12, fig.height=6}
+
+par(mfrow = c(1, 2), mar = c(8, 4, 3, 1))
+
+boxplot(
+  initial_standardized_residuals ~ housing_clean$overall_quality,
+  main = "Residuals by Overall Quality",
+  xlab = "Overall Quality",
+  ylab = "Standardized Residuals",
+  col = "white",
+  las = 2,
+  cex.axis = 0.75
+)
+
+abline(h = 0, col = "red", lty = 2, lwd = 2)
+
+boxplot(
+  initial_standardized_residuals ~ housing_clean$neighborhood,
+  main = "Residuals by Neighborhood",
+  xlab = "Neighborhood",
+  ylab = "Standardized Residuals",
+  col = "white",
+  las = 2,
+  cex.axis = 0.5
+)
+
+abline(h = 0, col = "red", lty = 2, lwd = 2)
+
+par(mfrow = c(1, 1))
+
+```
+
+## 5.4 Normal Q-Q Plot
+
+```{r initial-qq-plot}
+
+qqnorm(
+  initial_standardized_residuals,
+  main = "Normal Q-Q Plot of Initial Model Residuals",
+  pch = 16,
+  col = "black"
+)
+
+qqline(
+  initial_standardized_residuals,
+  col = "red",
+  lwd = 2
+)
+
+```
+
+# 6. Model Refinement
+
+## 6.1 Box-Cox Transformation
+
+```{r box-cox-transformation, fig.width=8, fig.height=6}
+
+boxcox_result <- MASS::boxcox(
+  initial_model,
+  lambda = seq(-1, 1, by = 0.01),
+  plotit = TRUE
+)
+
+estimated_lambda <- boxcox_result$x[
+  which.max(boxcox_result$y)
+]
+
+estimated_lambda
+
+```
+
+## 6.2 Create the Transformed Response Variable
+
+```{r create-transformed-response}
+
+# Use a convenient value close to the estimated Box-Cox lambda
+lambda_selected <- 0.25
+
+housing_clean <- housing_clean %>%
+  mutate(
+    sale_price_bc =
+      (sale_price^lambda_selected - 1) / lambda_selected
+  )
+
+head(
+  housing_clean[, c(
+    "sale_price",
+    "sale_price_bc"
+  )]
+)
+
+```
+
+## 6.3 Transformed Multiple Linear Regression Model
+
+```{r transformed-model}
+
+transformed_model <- lm(
+  sale_price_bc ~
+    living_area +
+    basement_area +
+    overall_quality +
+    year_built +
+    neighborhood +
+    garage_capacity,
+  data = housing_clean
+)
+
+summary(transformed_model)
+
+```
+
+## 6.4 Transformed Model Coefficient Table
+
+```{r transformed-coefficient-table}
+
+transformed_coefficient_table <- broom::tidy(
+  transformed_model,
+  conf.int = TRUE,
+  conf.level = 0.95
+)
+
+transformed_coefficient_table <- transformed_coefficient_table[, c(
+  "term",
+  "estimate",
+  "std.error",
+  "statistic",
+  "p.value",
+  "conf.low",
+  "conf.high"
+)]
+
+colnames(transformed_coefficient_table) <- c(
+  "Variable",
+  "Estimate",
+  "Standard Error",
+  "t Statistic",
+  "p-value",
+  "95% CI Lower",
+  "95% CI Upper"
+)
+
+kable(
+  transformed_coefficient_table,
+  digits = 4,
+  caption = "Coefficient Estimates for the Box-Cox Transformed Model"
+)
+
+```
+
+## 6.5 Transformed Model Fit
+
+```{r transformed-model-fit}
+
+transformed_model_summary <- summary(transformed_model)
+
+n_transformed <- nobs(transformed_model)
+k_transformed <- length(coef(transformed_model))
+
+transformed_aic <- AIC(transformed_model)
+
+transformed_aicc <- transformed_aic +
+  (2 * k_transformed * (k_transformed + 1)) /
+  (n_transformed - k_transformed - 1)
+
+transformed_fit_table <- data.frame(
+  Measure = c(
+    "R-squared",
+    "Adjusted R-squared",
+    "Residual Standard Error",
+    "AIC",
+    "AICc",
+    "BIC"
+  ),
+  Value = c(
+    transformed_model_summary$r.squared,
+    transformed_model_summary$adj.r.squared,
+    transformed_model_summary$sigma,
+    transformed_aic,
+    transformed_aicc,
+    BIC(transformed_model)
+  )
+)
+
+kable(
+  transformed_fit_table,
+  digits = 4,
+  caption = "Model Fit Measures for the Box-Cox Transformed Model"
+)
+
+```
+
+## 6.6 Standard Diagnostic Plots After Transformation
+
+```{r transformed-standard-diagnostics, fig.width=10, fig.height=8}
+
+par(mfrow = c(2, 2))
+
+plot(transformed_model)
+
+par(mfrow = c(1, 1))
+
+```
+
+## 6.7 Residual Plots for Numerical Predictors After Transformation
+
+```{r transformed-numerical-residuals, fig.width=10, fig.height=8}
+
+transformed_standardized_residuals <- rstandard(transformed_model)
+transformed_fitted_values <- fitted(transformed_model)
+
+par(mfrow = c(2, 2))
+
+plot(
+  housing_clean$living_area,
+  transformed_standardized_residuals,
+  main = "Residuals vs Living Area",
+  xlab = "Living Area",
+  ylab = "Standardized Residuals",
+  pch = 16,
+  col = "black"
+)
+abline(
+  h = 0,
+  col = "red",
+  lty = 2,
+  lwd = 2
+)
+
+plot(
+  housing_clean$basement_area,
+  transformed_standardized_residuals,
+  main = "Residuals vs Basement Area",
+  xlab = "Basement Area",
+  ylab = "Standardized Residuals",
+  pch = 16,
+  col = "black"
+)
+abline(
+  h = 0,
+  col = "red",
+  lty = 2,
+  lwd = 2
+)
+
+plot(
+  housing_clean$year_built,
+  transformed_standardized_residuals,
+  main = "Residuals vs Year Built",
+  xlab = "Year Built",
+  ylab = "Standardized Residuals",
+  pch = 16,
+  col = "black"
+)
+abline(
+  h = 0,
+  col = "red",
+  lty = 2,
+  lwd = 2
+)
+
+plot(
+  housing_clean$garage_capacity,
+  transformed_standardized_residuals,
+  main = "Residuals vs Garage Capacity",
+  xlab = "Garage Capacity",
+  ylab = "Standardized Residuals",
+  pch = 16,
+  col = "black"
+)
+abline(
+  h = 0,
+  col = "red",
+  lty = 2,
+  lwd = 2
+)
+
+par(mfrow = c(1, 1))
+
+```
+
+## 6.8 Residual Plots for Categorical Predictors After Transformation
+
+```{r transformed-categorical-residuals, fig.width=12, fig.height=6}
+
+par(
+  mfrow = c(1, 2),
+  mar = c(8, 4, 3, 1)
+)
+
+boxplot(
+  transformed_standardized_residuals ~
+    housing_clean$overall_quality,
+  main = "Residuals by Overall Quality",
+  xlab = "Overall Quality",
+  ylab = "Standardized Residuals",
+  col = "white",
+  las = 2,
+  cex.axis = 0.75
+)
+
+abline(
+  h = 0,
+  col = "red",
+  lty = 2,
+  lwd = 2
+)
+
+boxplot(
+  transformed_standardized_residuals ~
+    housing_clean$neighborhood,
+  main = "Residuals by Neighborhood",
+  xlab = "Neighborhood",
+  ylab = "Standardized Residuals",
+  col = "white",
+  las = 2,
+  cex.axis = 0.5
+)
+
+abline(
+  h = 0,
+  col = "red",
+  lty = 2,
+  lwd = 2
+)
+
+par(mfrow = c(1, 1))
+
+```
+
+## 6.9 Normal Q-Q Plot After Transformation
+
+```{r transformed-qq-plot, fig.width=8, fig.height=6}
+
+qqnorm(
+  transformed_standardized_residuals,
+  main = "Normal Q-Q Plot After Box-Cox Transformation",
+  pch = 16,
+  col = "black"
+)
+
+qqline(
+  transformed_standardized_residuals,
+  col = "red",
+  lwd = 2
+)
+
+```
+
+
+# 7.1 Multicollinearity Assessment
+
+```{r gvif-assessment}
+
+vif_values <- car::vif(transformed_model)
+
+vif_table <- data.frame(
+  Variable = rownames(vif_values),
+  GVIF = vif_values[, "GVIF"],
+  Degrees_of_Freedom = vif_values[, "Df"],
+  Adjusted_GVIF = vif_values[, "GVIF^(1/(2*Df))"],
+  row.names = NULL
+)
+
+knitr::kable(
+  vif_table,
+  digits = 3,
+  col.names = c(
+    "Variable",
+    "GVIF",
+    "Degrees of Freedom",
+    "Adjusted GVIF"
+  ),
+  caption = "Generalized Variance Inflation Factors for the Box-Cox Transformed Model"
+)
+
+
+```
+
+## 7.2 Testing for a Quadratic Effect
+
+
+```{r quadratic-model}
+
+# Fit a model that adds a quadratic term for Year Built
+quadratic_model <- lm(
+  sale_price_bc ~
+    living_area +
+    basement_area +
+    overall_quality +
+    year_built +
+    I(year_built^2) +
+    neighborhood +
+    garage_capacity,
+  data = housing_clean
+)
+
+# Display the model summary
+summary(quadratic_model)
+
+```
+
+```{r partial-f-test}
+
+# Compare the transformed model with the quadratic model
+quadratic_test <- anova(
+  transformed_model,
+  quadratic_model
+)
+
+knitr::kable(
+  quadratic_test,
+  digits = 4,
+  caption = "Partial F-test Comparing the Transformed Model and the Quadratic Model"
+)
+
+```
+
+
+## 7.3 Influence Diagnostics
+
+```{r cooks-distance}
+
+# Calculate Cook's distance for the transformed model
+cook_values <- cooks.distance(transformed_model)
+
+# Define the reference threshold
+cook_threshold <- 4 / nrow(housing_clean)
+
+# Plot Cook's distance
+plot(
+  cook_values,
+  type = "h",
+  main = "Cook's Distance for the Box-Cox Transformed Model",
+  xlab = "Observation",
+  ylab = "Cook's Distance"
+)
+
+abline(
+  h = cook_threshold,
+  col = "red",
+  lty = 2,
+  lwd = 2
+)
+
+```
+
+```{r influential-observations}
+
+# Identify observations above the Cook's distance threshold
+influential_cases <- which(
+  cook_values > cook_threshold
+)
+
+# Display the number and indices of influential observations
+length(influential_cases)
+
+influential_cases
+
+```
+
+```{r influence-summary-table}
+
+influence_summary <- data.frame(
+  Measure = c(
+    "Total observations",
+    "Cook's distance threshold",
+    "Observations above threshold",
+    "Maximum Cook's distance"
+  ),
+  Value = c(
+    nrow(housing_clean),
+    cook_threshold,
+    length(influential_cases),
+    max(cook_values)
+  )
+)
+
+knitr::kable(
+  influence_summary,
+  digits = 6,
+  caption = "Summary of Cook's Distance Results"
+)
+
+```
+
+```{r final-model}
+
+# Remove observations above the Cook's distance threshold
+housing_final <- housing_clean[
+  -influential_cases,
+]
+
+# Refit the model using the remaining observations
+final_model <- lm(
+  sale_price_bc ~
+    living_area +
+    basement_area +
+    overall_quality +
+    year_built +
+    neighborhood +
+    garage_capacity,
+  data = housing_final
+)
+
+summary(final_model)
+
+```
+
+```{r model-comparison}
+
+comparison_table <- data.frame(
+  Model = c(
+    "Transformed Model",
+    "Model After Removing Influential Observations"
+  ),
+  Observations = c(
+    nobs(transformed_model),
+    nobs(final_model)
+  ),
+  R_squared = c(
+    summary(transformed_model)$r.squared,
+    summary(final_model)$r.squared
+  ),
+  Adjusted_R_squared = c(
+    summary(transformed_model)$adj.r.squared,
+    summary(final_model)$adj.r.squared
+  ),
+  Residual_Standard_Error = c(
+    summary(transformed_model)$sigma,
+    summary(final_model)$sigma
+  ),
+  AIC = c(
+    AIC(transformed_model),
+    AIC(final_model)
+  ),
+  BIC = c(
+    BIC(transformed_model),
+    BIC(final_model)
+  )
+)
+
+knitr::kable(
+  comparison_table,
+  digits = 4,
+  caption = "Comparison Before and After Removing Influential Observations"
+)
+
+```
+
+```{r final-model-diagnostics, fig.width=10, fig.height=8}
+
+par(mfrow = c(2, 2))
+
+plot(final_model)
+
+par(mfrow = c(1, 1))
+
+```
+
+## 7.4 Final Model Results
+
+```{r final-coefficient-table}
+
+final_coefficient_table <- broom::tidy(
+  final_model,
+  conf.int = TRUE,
+  conf.level = 0.95
+)
+
+final_coefficient_table <- final_coefficient_table[, c(
+  "term",
+  "estimate",
+  "std.error",
+  "statistic",
+  "p.value",
+  "conf.low",
+  "conf.high"
+)]
+
+colnames(final_coefficient_table) <- c(
+  "Variable",
+  "Estimate",
+  "Standard Error",
+  "t Statistic",
+  "p-value",
+  "95% CI Lower",
+  "95% CI Upper"
+)
+
+knitr::kable(
+  final_coefficient_table,
+  digits = 4,
+  caption = "Coefficient Estimates for the Final Regression Model"
+)
+
+```
+
+```{r final-model-fit}
+
+final_glance <- broom::glance(final_model)
+
+final_fit_table <- data.frame(
+  Measure = c(
+    "Number of Observations",
+    "R-squared",
+    "Adjusted R-squared",
+    "Residual Standard Error",
+    "F Statistic",
+    "Model p-value",
+    "AIC",
+    "BIC"
+  ),
+  Value = c(
+    nobs(final_model),
+    final_glance$r.squared,
+    final_glance$adj.r.squared,
+    final_glance$sigma,
+    final_glance$statistic,
+    final_glance$p.value,
+    AIC(final_model),
+    BIC(final_model)
+  )
+)
+
+knitr::kable(
+  final_fit_table,
+  digits = 4,
+  caption = "Model Fit Measures for the Final Regression Model"
+)
+
+```
+
+```{r final-model-formula}
+
+formula(final_model)
+
+```
+¥
+```{r final-model-diagnostics-2, fig.width=10, fig.height=8}
+
+par(mfrow = c(2, 2))
+
+plot(final_model)
+
+par(mfrow = c(1, 1))
+
+```
+
+```{r final-residual-plots, fig.width=10, fig.height=8}
+
+final_standardized_residuals <- rstandard(final_model)
+
+par(mfrow = c(2, 2))
+
+plot(
+  housing_final$living_area,
+  final_standardized_residuals,
+  main = "Final Residuals vs Living Area",
+  xlab = "Living Area",
+  ylab = "Standardized Residuals",
+  pch = 16,
+  col = "black"
+)
+abline(h = 0, col = "red", lty = 2, lwd = 2)
+
+plot(
+  housing_final$basement_area,
+  final_standardized_residuals,
+  main = "Final Residuals vs Basement Area",
+  xlab = "Basement Area",
+  ylab = "Standardized Residuals",
+  pch = 16,
+  col = "black"
+)
+abline(h = 0, col = "red", lty = 2, lwd = 2)
+
+plot(
+  housing_final$year_built,
+  final_standardized_residuals,
+  main = "Final Residuals vs Year Built",
+  xlab = "Year Built",
+  ylab = "Standardized Residuals",
+  pch = 16,
+  col = "black"
+)
+abline(h = 0, col = "red", lty = 2, lwd = 2)
+
+plot(
+  housing_final$garage_capacity,
+  final_standardized_residuals,
+  main = "Final Residuals vs Garage Capacity",
+  xlab = "Garage Capacity",
+  ylab = "Standardized Residuals",
+  pch = 16,
+  col = "black"
+)
+abline(h = 0, col = "red", lty = 2, lwd = 2)
+
+par(mfrow = c(1, 1))
+
+```
+
+```{r final-categorical-residuals, fig.width=12, fig.height=6}
+
+par(mfrow = c(1, 2), mar = c(8, 4, 3, 1))
+
+boxplot(
+  final_standardized_residuals ~ housing_final$overall_quality,
+  main = "Final Residuals by Overall Quality",
+  xlab = "Overall Quality",
+  ylab = "Standardized Residuals",
+  col = "white",
+  las = 2,
+  cex.axis = 0.75
+)
+
+abline(h = 0, col = "red", lty = 2, lwd = 2)
+
+boxplot(
+  final_standardized_residuals ~ housing_final$neighborhood,
+  main = "Final Residuals by Neighborhood",
+  xlab = "Neighborhood",
+  ylab = "Standardized Residuals",
+  col = "white",
+  las = 2,
+  cex.axis = 0.5
+)
+
+abline(h = 0, col = "red", lty = 2, lwd = 2)
+
+par(mfrow = c(1, 1))
+
+```
+
+# 8. Model Validation
+
+
+## 8.1 Training and Test Set Split
+
+```{r train-test-split}
+
+set.seed(302)
+
+train_index <- sample(
+  seq_len(nrow(housing_final)),
+  size = floor(0.8 * nrow(housing_final))
+)
+
+training_data <- housing_final[train_index, ]
+test_data <- housing_final[-train_index, ]
+
+split_table <- data.frame(
+  Dataset = c("Training Set", "Test Set"),
+  Observations = c(
+    nrow(training_data),
+    nrow(test_data)
+  )
+)
+
+knitr::kable(
+  split_table,
+  caption = "Sample Sizes for the Training and Test Sets"
+)
+```
+## 8.2 Fit the Validation Model
+
+```{r validation-model}
+
+validation_model <- lm(
+  sale_price_bc ~
+    living_area +
+    basement_area +
+    overall_quality +
+    year_built +
+    neighborhood +
+    garage_capacity,
+  data = training_data
+)
+
+summary(validation_model)
+```
+
+## 8.3 Test-Set Performance
+
+```{r test-set-performance}
+
+# Predict the transformed response for the test set
+test_predictions_bc <- predict(
+  validation_model,
+  newdata = test_data
+)
+
+# Actual transformed response
+test_actual_bc <- test_data$sale_price_bc
+
+# Calculate prediction accuracy
+test_mse <- mean(
+  (test_actual_bc - test_predictions_bc)^2
+)
+
+test_rmse <- sqrt(test_mse)
+
+test_mae <- mean(
+  abs(test_actual_bc - test_predictions_bc)
+)
+
+test_r_squared <- 1 -
+  sum((test_actual_bc - test_predictions_bc)^2) /
+  sum((test_actual_bc - mean(test_actual_bc))^2)
+
+validation_table <- data.frame(
+  Measure = c(
+    "Test MSE",
+    "Test RMSE",
+    "Test MAE",
+    "Test R-squared"
+  ),
+  Value = c(
+    test_mse,
+    test_rmse,
+    test_mae,
+    test_r_squared
+  )
+)
+
+knitr::kable(
+  validation_table,
+  digits = 4,
+  caption = "Test-Set Performance of the Final Regression Model"
+)
+
+```
+
+## 8.4 Performance on the Original Sale Price Scale
+
+```{r original-scale-validation}
+
+lambda_selected <- 0.25
+
+# Convert predictions back to the original sale-price scale
+test_predictions_price <- (
+  lambda_selected * test_predictions_bc + 1
+)^(1 / lambda_selected)
+
+test_actual_price <- test_data$sale_price
+
+price_mse <- mean(
+  (test_actual_price - test_predictions_price)^2
+)
+
+price_rmse <- sqrt(price_mse)
+
+price_mae <- mean(
+  abs(test_actual_price - test_predictions_price)
+)
+
+price_r_squared <- 1 -
+  sum((test_actual_price - test_predictions_price)^2) /
+  sum((test_actual_price - mean(test_actual_price))^2)
+
+original_scale_table <- data.frame(
+  Measure = c(
+    "Test RMSE in Dollars",
+    "Test MAE in Dollars",
+    "Test R-squared"
+  ),
+  Value = c(
+    price_rmse,
+    price_mae,
+    price_r_squared
+  )
+)
+
+knitr::kable(
+  original_scale_table,
+  digits = 2,
+  caption = "Test-Set Performance on the Original Sale Price Scale"
+)
+
+```
+
+## 8.5 Actual and Predicted Sale Prices
+
+```{r actual-predicted-plot, fig.width=8, fig.height=6}
+
+plot(
+  test_actual_price,
+  test_predictions_price,
+  main = "Actual versus Predicted Sale Prices",
+  xlab = "Actual Sale Price",
+  ylab = "Predicted Sale Price",
+  pch = 16,
+  col = "black"
+)
+
+abline(
+  a = 0,
+  b = 1,
+  col = "red",
+  lwd = 2,
+  lty = 2
+)
+
+``` 
