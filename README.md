@@ -29,4 +29,4 @@ Predictors: above-ground living area, total basement area, year built, garage ca
 - Adjusted R² ≈ 0.91
 - Test R² ≈ 0.90
 
-High R square is suitable.
+The final model explained approximately 91% of the variation in housing sale prices.
