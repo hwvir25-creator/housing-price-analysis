@@ -30,3 +30,6 @@ Predictors: above-ground living area, total basement area, year built, garage ca
 - Test R² ≈ 0.90
 
 The final model explained approximately 91% of the variation in housing sale prices.
+
+# PDFs :If the PDF preview shows an error, click the three-dot menu (`...`) in the upper right corner and select View raw or Download!
+
