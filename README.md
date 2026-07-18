@@ -16,6 +16,12 @@ The analysis includes:
 - Model validation with training-test split
 - Prediction evaluation on both the transformed and original sale price scales
 
+# Focus on
+1.  Which housing characteristics (factors) are most strongly associated with sale price?
+2.  How accurately can a multiple linear regression model predict prices for new homes?
+3.  How can the results support real-world housing decisions?
+
+
 # Dataset
 
 Source: AmesHousing
@@ -30,6 +36,11 @@ Predictors: above-ground living area, total basement area, year built, garage ca
 - Test R² ≈ 0.90
 
 The final model explained approximately 91% of the variation in housing sale prices.
+
+The results also show that square footage alone does not fully explain housing prices.  Two homes of a similar size may still have different values because of differences in condition, quality, garage space, and location.
+
+# Implication
+This model helps explain how features such as living area, overall quality, basement size, garage capacity, and neighborhood are related to house prices. Buyers can use the results to better understand price differences between similar homes, while sellers and real estate agents can use them as a starting point when evaluating a property. 
 
 # PDFs :If the PDF preview shows an error, click the three-dot menu (`...`) in the upper right corner and select View raw or Download!
 
